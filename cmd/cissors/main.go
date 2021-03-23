@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/xornivore/cissors"
+	"github.com/DataDog/cissors"
 
 	"github.com/ledongthuc/pdf"
 	"gopkg.in/alecthomas/kingpin.v2"

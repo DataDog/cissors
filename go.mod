@@ -1,4 +1,4 @@
-module github.com/xornivore/cissors
+module github.com/DataDog/cissors
 
 go 1.14
 

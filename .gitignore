@@ -1,3 +1,5 @@
 cmd/cissors/cissors
 parsed
 .vscode
+vendor
+bin
