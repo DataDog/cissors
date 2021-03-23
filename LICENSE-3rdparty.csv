@@ -1,8 +1,8 @@
 Component,Origin,License
 core,"github.com/frapposelli/wwhrd",MIT
-core,"github.com/alecthomas/template",NewBSD
-core,"github.com/alecthomas/template/parse",NewBSD
+core,"github.com/alecthomas/template",BSD-3-Clause
+core,"github.com/alecthomas/template/parse",BSD-3-Clause
 core,"github.com/alecthomas/units",MIT
-core,"github.com/ledongthuc/pdf",NewBSD
+core,"github.com/ledongthuc/pdf",BSD-3-Clause
 core,"gopkg.in/alecthomas/kingpin.v2",MIT
 core,"gopkg.in/yaml.v3",MIT
