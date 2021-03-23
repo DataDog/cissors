@@ -12,4 +12,4 @@ $ROOT/bin/wwhrd list
 echo Component,Origin,License > LICENSE-3rdparty.csv
 echo 'core,"github.com/frapposelli/wwhrd",MIT' >> LICENSE-3rdparty.csv
 unset grep
-$ROOT/bin/wwhrd list --no-color |& grep "Found License" | awk '{print $6,$5}' | sed -E "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g" | sed s/" license="/,/ | sed s/package=/core,/ | sort >> LICENSE-3rdparty.csv
+$ROOT/bin/wwhrd list --no-color |& grep "Found License" | awk '{print $6,$5}' | sed -E "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g" | sed s/" license="/,/ | sed s/package=/core,/ | sed s/NewBSD/BSD-3-Clause/ | sort >> LICENSE-3rdparty.csv
