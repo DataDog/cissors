@@ -26,17 +26,22 @@ var (
 var (
 	pageMarkerRegex = regexp.MustCompile(`^([\d]+\s+\|\s+Page)`)
 
-	titleExtractRegex = regexp.MustCompile(`((\d+\.)*?(\d+))\s([A-Za-z]*)(\s[A-Za-z\:\.,_\-\/\(\)]*?|\s\d{1,5}|\s(?:[0-9]{1,3}\.){3}[0-9]{1,3}(\/\d{1,2})?)*(\.+)?\s\d+\s`)
-	titleCropRegex    = regexp.MustCompile(`\s?\.+\s\d+\s$`)
-	titleIDRegex      = regexp.MustCompile(`([\d+\.]*\d+)\s([\w\s-\.\/\:]*)(?:\(((?:Not\s)?Scored)\))?`)
-	whitespace        = regexp.MustCompile(`\s+`)
+	// An id, eg. 1 or 1.2 or 1.21.1
+	id = `(\d+(?:\.\d+)*)`
+	// A name, then either (Automated), (Manual), (Scored) or (Not Scored),
+	nameAndRuleType = `(.*)(?:\((Automated|Manual|Scored|Not Scored)\))`
+
+	// Page number of a rule, and id of the next
+	titlesSeparatorRegex = regexp.MustCompile(`(\d+)\s` + id)
+
+	normalRuleTitleRegex = regexp.MustCompile(id + nameAndRuleType)
+	majorRuleTitleRegex  = regexp.MustCompile(id + `([^\.]+)\.+`)
 
 	sectionRegex = regexp.MustCompile(
 		`((Profile Applicability|Description|Rationale|Audit|Remediation|Impact|Default\sValue|References|CIS\sControls)\:\s+)`,
 	)
 
-	ruleTitleExtractRegex = regexp.MustCompile(`((\d+\.)*?(\d+))\s([A-Za-z]*)(\s[A-Za-z\:\.,_\-\/\(\)]*?|\d{1,5}|(?:[0-9]{1,3}\.){3}[0-9]{1,3}(\/\d{1,2})?)*\((Not\s)?Scored\)`)
-
+	whitespace    = regexp.MustCompile(`\s+`)
 	nonASCIIRegex = regexp.MustCompile(`[[:^ascii:]]`)
 )
 
@@ -53,14 +58,31 @@ func main() {
 
 	ruleIDToName := map[string]string{}
 	ruleCount := 0
+	matchingTitleRegString := []string{}
 
+	// First pass to find the titles (using the table of contents)
 	walkPages(reader, 2, reader.NumPage(), func(page int, content string) bool {
 		if *verbose {
 			fmt.Printf("✂️  Looking for titles in page %d\n", page)
 		}
 
-		titles := titleExtractRegex.FindAllString(content, -1)
+		// We split using a 'separator' between two titles - the page number at the end of the title
+		// and the id at the beginning on the next one
+		titles := []string{}
+		titlesSeparator := titlesSeparatorRegex.FindAllStringSubmatchIndex(content, -1)
+		startIndex := 0
+		for i := 0; i < len(titlesSeparator); i++ {
+			// index 3 is the end of the page number
+			titles = append(titles, content[startIndex:titlesSeparator[i][3]])
+			// index 4 is the beginning of the id
+			startIndex = titlesSeparator[i][4]
+		}
+		if len(titlesSeparator) > 0 {
+			// Pick the last title as well
+			titles = append(titles, content[startIndex:])
+		}
 
+		// The table of contents is finished
 		if len(ruleIDToName) != 0 && len(titles) == 0 {
 			// we will start scanning for rules from this page onward
 			startPage = page
@@ -68,9 +90,6 @@ func main() {
 		}
 
 		for _, title := range titles {
-			// Crop the trailing part
-			title = titleCropRegex.ReplaceAllString(title, "")
-
 			id, name, isActualRule, _, err := splitTitle(title)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -78,10 +97,12 @@ func main() {
 			}
 
 			if *verbose {
-				fmt.Printf("id: %s - name: %s\n", id, name)
+				fmt.Printf("id: %s - name: %s, actualRule: %t\n", id, name, isActualRule)
 			}
+
 			ruleIDToName[id] = name
 			if isActualRule {
+				matchingTitleRegString = append(matchingTitleRegString, regexp.QuoteMeta(id))
 				ruleCount++
 			}
 		}
@@ -95,6 +116,9 @@ func main() {
 		nextRuleTitle   string
 		rules           []*cissors.Rule
 	)
+
+	// We build a regex that's more precise than normalRuleTitleRegex, as it matches on the actual rule ids we expect
+	ruleTitleExtractRegex := regexp.MustCompile("(" + strings.Join(matchingTitleRegString, "|") + `)\s` + nameAndRuleType)
 
 	walkPages(reader, startPage, reader.NumPage(), func(page int, content string) bool {
 		if *verbose {
@@ -179,7 +203,7 @@ func main() {
 }
 
 func extractRule(title, content string) (*cissors.Rule, error) {
-	id, name, _, scored, err := splitTitle(title)
+	id, name, _, ruleType, err := splitTitle(title)
 	if err != nil {
 		return nil, fmt.Errorf("Malformed rule title %s: %w", title, err)
 	}
@@ -192,7 +216,7 @@ func extractRule(title, content string) (*cissors.Rule, error) {
 
 	rule := &cissors.Rule{
 		ID:       *idPrefix + id,
-		Scored:   scored,
+		RuleType: ruleType,
 		Name:     name,
 		Sections: map[string]string{},
 	}
@@ -235,22 +259,28 @@ func cutPageMarker(s string) (string, bool) {
 }
 
 // Split a title into its id, its name, whether it's an actual rule or group of rules
-// and whether it's scored
-func splitTitle(title string) (id, name string, isActualRule bool, scored bool, err error) {
-	titleParts := titleIDRegex.FindStringSubmatch(title)
-	if titleParts == nil {
-		err = fmt.Errorf("failed to split title into id, name and scored: %s", title)
+// and it's type
+func splitTitle(title string) (id, name string, isActualRule bool, ruleType cissors.RuleType, err error) {
+	titleParts := normalRuleTitleRegex.FindStringSubmatch(title)
+	if titleParts != nil {
+		// Actual rule
+		isActualRule = true
+		id = titleParts[1]
+		name = strings.TrimSpace(replaceWhitespaces(titleParts[2]))
+		ruleType = (cissors.RuleType)(titleParts[3])
 		return
 	}
 
-	id = titleParts[1]
-	name = replaceWhitespaces(titleParts[2])
-	if len(titleParts[3]) > 0 {
-		isActualRule = true
-		scored = titleParts[3] == "Scored"
-	} else {
+	// May be a group of rules
+	titleParts = majorRuleTitleRegex.FindStringSubmatch(title)
+	if titleParts != nil {
 		isActualRule = false
+		id = titleParts[1]
+		name = strings.TrimSpace(replaceWhitespaces(titleParts[2]))
+		return
 	}
+
+	err = fmt.Errorf("Failed to parse the title as either a rule or a group of rules: %s", title)
 	return
 }
 
